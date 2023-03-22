@@ -7,9 +7,10 @@ import dgl.sparse as dglsp
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dgl.data import CoraGraphDataset
+from dgl.data import CoraGraphDataset, FlickrDataset
 from torch.optim import Adam
-
+import ctypes
+import python_ops
 
 class GATConv(nn.Module):
     def __init__(self, in_size, out_size, num_heads, dropout):
@@ -44,7 +45,15 @@ class GATConv(nn.Module):
         e = e_l[A_hat.row] + e_r[A_hat.col]
 
         a = F.leaky_relu(e)
-        A_atten = dglsp.val_like(A_hat, a).softmax()
+        tmp = dglsp.val_like(A_hat, a)
+        A_atten = tmp.softmax()
+        # tmp2 = python_ops.py_softmax(tmp)
+
+        # print(torch.allclose(A_atten.indices(), tmp2.indices()))
+        # print(torch.allclose(A_atten.val, tmp2.val))
+
+        # exit()
+
         a_drop = self.dropout(A_atten.val)
         A_atten = dglsp.val_like(A_atten, a_drop)
         return dglsp.bspmm(A_atten, Z)
@@ -90,27 +99,40 @@ def train(model, g, A_hat, X):
     for epoch in range(50):
         # Forward.
         model.train()
+
+
+        if(epoch == 10):
+            _cudart = ctypes.CDLL('libcudart.so')
+            ret = _cudart.cudaProfilerStart()
+
+            
+        torch.cuda.nvtx.range_push("forward" + str(epoch))
         logits = model(A_hat, X)
+        torch.cuda.nvtx.range_pop()
 
-        # Compute loss with nodes in training set.
-        loss = F.cross_entropy(logits[train_mask], label[train_mask])
+        if(epoch == 49):
+            ret = _cudart.cudaProfilerStop()
 
-        # Backward.
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        # # Compute loss with nodes in training set.
+        # loss = F.cross_entropy(logits[train_mask], label[train_mask])
+
+        # # Backward.
+        # optimizer.zero_grad()
+        # # loss.backward()
+        # optimizer.step()
 
         # Compute prediction.
-        model.eval()
-        logits = model(A_hat, X)
-        pred = logits.argmax(dim=1)
+        # model.eval()
+        # logits = model(A_hat, X)
+        # pred = logits.argmax(dim=1)
 
         # Evaluate the prediction.
-        val_acc, test_acc = evaluate(g, pred)
-        print(
-            f"In epoch {epoch}, loss: {loss:.3f}, val acc: {val_acc:.3f}, test"
-            f" acc: {test_acc:.3f}"
-        )
+        # val_acc, test_acc = evaluate(g, pred)
+        # print(
+        #     f"In epoch {epoch}, loss: {loss:.3f}, val acc: {val_acc:.3f}, test"
+        #     f" acc: {test_acc:.3f}"
+        # )
+        print(epoch)
 
 
 if __name__ == "__main__":
@@ -119,7 +141,7 @@ if __name__ == "__main__":
     dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Load graph from the existing dataset.
-    dataset = CoraGraphDataset()
+    dataset = FlickrDataset()
     g = dataset[0].to(dev)
 
     # Create the sparse adjacency matrix A.

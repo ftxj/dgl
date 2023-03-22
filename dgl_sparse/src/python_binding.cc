@@ -14,6 +14,8 @@
 #include <sparse/sparse_matrix.h>
 #include <sparse/spmm.h>
 #include <sparse/spspmm.h>
+#include <sparse/unfused_ops.h>
+
 #include <torch/custom_class.h>
 #include <torch/script.h>
 
@@ -49,6 +51,7 @@ TORCH_LIBRARY(dgl_sparse, m) {
       .def("spmm", &SpMM)
       .def("sddmm", &SDDMM)
       .def("softmax", &Softmax)
+      .def("broadcast_op_unfused_part0", &BroadcastOpNoAutoGrad_Unfused0)
       .def("spspmm", &SpSpMM);
 }
 
