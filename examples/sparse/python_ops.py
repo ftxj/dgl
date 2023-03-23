@@ -4,25 +4,26 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def unwrapper0(A):
+    return A.val, A.nnz, A.c_sparse_matrix
+
 def py_BroadcastOpNoAutoGrad(sparse_mat: dglsp.SparseMatrix, dense_mat: torch.Tensor, op, dim: int):
-    sparse_val = sparse_mat.val
-    out_row = sparse_mat.nnz
+    sparse_val, out_row, c_matrix = unwrapper0(sparse_mat)
     shape = [out_row, sparse_val.size(1)]
     ret = torch.zeros(shape, dtype = sparse_val.dtype, device = sparse_val.device)
-    return torch.ops.dgl_sparse.broadcast_op_unfused_part0(sparse_mat.c_sparse_matrix, sparse_val, dense_mat, ret, op, dim)
+    return torch.ops.dgl_sparse.broadcast_op_unfused_part0(c_matrix, sparse_val, dense_mat, ret, op, dim)
 
 def py_BroadcastSubNoAutoGrad(sparse_mat, dense_mat, dim):
-    return py_BroadcastOpNoAutoGrad(sparse_mat, dense_mat, "sub", dim);
+    return py_BroadcastOpNoAutoGrad(sparse_mat, dense_mat, "sub", dim)
 
 def py_BroadcastDivNoAutoGrad(sparse_mat, dense_mat, dim):
-    return py_BroadcastOpNoAutoGrad(sparse_mat, dense_mat, "div", dim);
+    return py_BroadcastOpNoAutoGrad(sparse_mat, dense_mat, "div", dim)
 
+def unwrapper1(A):
+    return A.val, A.coo(), A.indices()
 
 def py_reduce_along(A, reduce, dim):
-    value = A.val
-    coo = A.coo()
-
-    indices = A.indices()
+    value, coo, indices = unwrapper1(A)
 
     if (reduce == "sum"):
         reduce_op = "sum"
@@ -59,8 +60,10 @@ def py_reduce_sum(A, dim):
 def py_softmax_forward(sparse_mat, sparse_val, dim):
     sparse_val_max = py_reduce_max(sparse_mat, dim)
     sparse_val_exp = py_BroadcastSubNoAutoGrad(sparse_mat, sparse_val_max, dim).exp()
+
     sparse_val_sum = py_reduce_sum(dglsp.val_like(sparse_mat, sparse_val_exp), dim)
     sparse_score = py_BroadcastDivNoAutoGrad(dglsp.val_like(sparse_mat, sparse_val_exp), sparse_val_sum, dim)
+
     sparse_requires_grad = sparse_val.requires_grad
     if sparse_requires_grad:
         cache_sparse_score = sparse_score
@@ -71,8 +74,12 @@ def py_softmax_forward(sparse_mat, sparse_val, dim):
     # ctx->save_for_backward({cache_sparse_score});
     return sparse_score
 
+
+def unwrapper2(A):
+    return A.val
+
 def py_softmax(sparse_mat: dglsp.SparseMatrix , dim: int = 1):
-    sparse_val = sparse_mat.val
+    sparse_val = unwrapper2(sparse_mat)
     expand_dim = False
     new_sparse_mat = sparse_mat
     if (sparse_val.dim() == 1):
@@ -86,11 +93,11 @@ def py_softmax(sparse_mat: dglsp.SparseMatrix , dim: int = 1):
         new_sparse_val = new_sparse_val.view(-1)
     return dglsp.val_like(sparse_mat, new_sparse_val)
 
+def test():
+    indices = torch.tensor([[0, 1, 1], [0, 0, 2]])
+    val = torch.tensor([1, 1, 2])
 
-indices = torch.tensor([[0, 1, 1], [0, 0, 2]])
-val = torch.tensor([1, 1, 2])
+    A = dglsp.spmatrix(indices, val, shape=(4, 3))
 
-A = dglsp.spmatrix(indices, val, shape=(4, 3))
-
-res = dglsp.smin(A, 0)
-res2 = py_reduce_min(A, 0)
+    res = dglsp.smin(A, 0)
+    res2 = py_reduce_min(A, 0)

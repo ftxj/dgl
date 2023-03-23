@@ -27,6 +27,8 @@ endif()
 set(Torch_DIR "${TORCH_PREFIX}/Torch")
 message(STATUS "Setting directory to ${Torch_DIR}")
 find_package(Torch REQUIRED)
+
+
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${TORCH_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g3 -ggdb")
@@ -39,7 +41,9 @@ file(GLOB SPARSE_HEADERS ${SPARSE_INCLUDE})
 file(GLOB SPARSE_SRC
   ${SPARSE_DIR}/*.cc
 )
+
 add_library(${LIB_DGL_SPARSE_NAME} SHARED ${SPARSE_SRC} ${SPARSE_HEADERS})
+
 target_include_directories(
   ${LIB_DGL_SPARSE_NAME} PRIVATE ${SPARSE_DIR} ${SPARSE_HEADERS})
 target_link_libraries(${LIB_DGL_SPARSE_NAME} "${TORCH_LIBRARIES}")

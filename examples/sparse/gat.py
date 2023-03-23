@@ -35,26 +35,35 @@ class GATConv(nn.Module):
     # (HIGHLIGHT) Take the advantage of DGL sparse APIs to implement
     # multihead attention.
     ###########################################################################
+    def foo2(self, A):
+        return A.row, A.col
+    
+    def foo3(self, A):
+        return A.val
+
     def forward(self, A_hat, Z):
+        
+        row, col = self.foo2(A_hat)
+
         Z = self.dropout(Z)
         Z = self.W(Z).view(Z.shape[0], self.out_size, self.num_heads)
 
         # a^T [Wh_i || Wh_j] = a_l Wh_i + a_r Wh_j
         e_l = (Z * self.a_l).sum(dim=1)
         e_r = (Z * self.a_r).sum(dim=1)
-        e = e_l[A_hat.row] + e_r[A_hat.col]
+        e = e_l[row] + e_r[col]
 
         a = F.leaky_relu(e)
         tmp = dglsp.val_like(A_hat, a)
-        A_atten = tmp.softmax()
-        # tmp2 = python_ops.py_softmax(tmp)
+        # A_atten = tmp.softmax()
+        A_atten = python_ops.py_softmax(tmp)
 
         # print(torch.allclose(A_atten.indices(), tmp2.indices()))
         # print(torch.allclose(A_atten.val, tmp2.val))
 
         # exit()
 
-        a_drop = self.dropout(A_atten.val)
+        a_drop = self.dropout(self.foo3(A_atten))
         A_atten = dglsp.val_like(A_atten, a_drop)
         return dglsp.bspmm(A_atten, Z)
 
@@ -72,11 +81,11 @@ class GAT(nn.Module):
             hidden_size * num_heads, out_size, num_heads=1, dropout=dropout
         )
 
-    def forward(self, A_hat, X):
+    def forward(self, A, X):
         # Flatten the head and feature dimension.
-        Z = F.elu(self.in_conv(A_hat, X)).flatten(1)
+        Z = F.elu(self.in_conv(A, X)).flatten(1)
         # Average over the head dimension.
-        Z = self.out_conv(A_hat, Z).mean(-1)
+        Z = self.out_conv(A, Z).mean(-1)
         return Z
 
 
@@ -91,7 +100,8 @@ def evaluate(g, pred):
     return val_acc, test_acc
 
 
-def train(model, g, A_hat, X):
+
+def train(model, g, A, X):
     label = g.ndata["label"]
     train_mask = g.ndata["train_mask"]
     optimizer = Adam(model.parameters(), lr=1e-2, weight_decay=5e-4)
@@ -107,7 +117,7 @@ def train(model, g, A_hat, X):
 
             
         torch.cuda.nvtx.range_push("forward" + str(epoch))
-        logits = model(A_hat, X)
+        logits = model(A, X)
         torch.cuda.nvtx.range_pop()
 
         if(epoch == 49):
@@ -158,6 +168,17 @@ if __name__ == "__main__":
     in_size = X.shape[1]
     out_size = dataset.num_classes
     model = GAT(in_size, out_size).to(dev)
+    from torch._dynamo import config
+    config.suppress_errors = True
 
+    import logging
+    from torch._inductor import config
+    config.debug = True
+
+    # from torch._dynamo import config as config2
+    # config2.log_level = logging.DEBUG
+    # config2.output_code = True
+
+    model = torch.compile(model)
     # Kick off training.
     train(model, g, A_hat, X)
